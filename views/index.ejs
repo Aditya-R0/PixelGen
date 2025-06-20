@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Email Tracker</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .pixel-card { 
+      border: 1px solid #ddd; 
+      padding: 15px; 
+      margin-bottom: 10px;
+      border-radius: 5px;
+    }
+    .pixel-url { 
+      background: #f5f5f5; 
+      padding: 8px; 
+      border-radius: 3px;
+      overflow-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>Tracking Pixels</h1>
+  
+  <form action="/create" method="POST">
+    <input type="text" name="name" placeholder="Pixel Name" required>
+    <button type="submit">Create New Pixel</button>
+  </form>
+  
+  <h2>Your Pixels</h2>
+  
+  <% if (pixels.length === 0) { %>
+    <p>No pixels created yet.</p>
+  <% } else { %>
+    <% pixels.forEach(pixel => { %>
+      <div class="pixel-card">
+        <strong><%= pixel.name %></strong>
+        <p>Created: <%= pixel.createdAt %></p>
+        <div class="pixel-url">
+          <%= baseUrl %>/tracker/<%= pixel.id %>.png
+        </div>
+        <a href="/logs/<%= pixel.id %>">View Logs</a>
+      </div>
+    <% }) %>
+  <% } %>
+</body>
+</html>

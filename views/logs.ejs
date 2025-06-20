@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Logs for <%= pixel.name %></title>
+</head>
+<body>
+  <h1>Logs for <%= pixel.name %></h1>
+  <p>Created: <%= pixel.createdAt %></p>
+  
+  <table border="1">
+    <tr>
+      <th>Timestamp</th>
+      <th>IP Address</th>
+      <th>User Agent</th>
+    </tr>
+    <% logs.forEach(log => { %>
+      <tr>
+        <td><%= log.timestamp %></td>
+        <td><%= log.ip %></td>
+        <td><%= log.user_agent %></td>
+      </tr>
+    <% }) %>
+  </table>
+</body>
+</html>
