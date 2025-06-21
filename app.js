@@ -7,7 +7,12 @@ const app = express();
 
 // Enable CORS for all origins (essential for extension)
 app.use(cors());
-
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "default-src 'self'");
+  next();
+});
 // Configuration
 app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: false }));
@@ -79,21 +84,55 @@ app.post('/create', (req, res) => {
 
 // Pixel tracking endpoint
 app.get('/tracker/:id.png', (req, res) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pixelId)) {
+    console.warn(`Invalid pixel ID format: ${pixelId}`);
+    return res.sendFile(path.join(__dirname, 'public/images/pixel.png'));
+  }
   const pixelId = req.params.id;
-  const ip = req.ip;
+  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   const userAgent = req.get('User-Agent') || 'Unknown';
 
-  db.run("INSERT INTO logs (pixel_id, ip, user_agent) VALUES (?, ?, ?)", 
-    [pixelId, ip, userAgent], 
-    (err) => {
-      if (err) console.error('Logging error:', err);
-      res.sendFile(path.join(__dirname, 'public/images/pixel.png'));
+  console.log(`Pixel accessed: ${pixelId}`); // Add logging
+
+  // 1. Verify pixel exists before logging
+  db.get("SELECT id FROM pixels WHERE id = ?", [pixelId], (err, pixel) => {
+    if (err) {
+      console.error('Pixel validation error:', err);
+      return res.sendFile(path.join(__dirname, 'public/images/pixel.png'));
     }
-  );
+    
+    if (!pixel) {
+      console.warn(`Unknown pixel accessed: ${pixelId}`);
+      return res.sendFile(path.join(__dirname, 'public/images/pixel.png'));
+    }
+
+    // 2. Insert log with error handling
+    db.run(
+      "INSERT INTO logs (pixel_id, ip, user_agent) VALUES (?, ?, ?)",
+      [pixelId, ip, userAgent],
+      (err) => {
+        if (err) {
+          console.error('Log INSERT error:', err.message);
+        } else {
+          console.log(`Logged access for pixel: ${pixelId}`);
+        }
+        
+        // 3. Disable caching
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        
+        res.sendFile(path.join(__dirname, 'public/images/pixel.png'));
+      }
+    );
+  });
 });
 
 // View logs endpoint
 app.get('/logs/:id', (req, res) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pixelId)) {
+    return res.status(400).send('Invalid pixel ID');
+  }
   const pixelId = req.params.id;
   
   db.get("SELECT * FROM pixels WHERE id = ?", [pixelId], (err, pixel) => {
@@ -129,7 +168,7 @@ app.get('/check', (req, res) => {
     GROUP BY pixel_id
   `;
   
-  db.all(query, [new Date(parseInt(since)).toISOString()], (err, logs) => {
+  db.all(query, [new Date(parseInt(since)).toISOString().replace('T', ' ').substring(0, 19)], (err, logs) => {
     if (err) {
       console.error('Error fetching logs:', err);
       return res.status(500).json({ error: 'Database error' });
