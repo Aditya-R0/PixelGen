@@ -117,27 +117,33 @@ app.get('/logs/:id', (req, res) => {
   });
 });
 
-// ADD THIS NEW ENDPOINT HERE:
+// Add this after your existing routes in app.js
 app.get('/check', (req, res) => {
-  const since = req.query.since || Date.now() - 3600000; // Default to last hour
+  const since = req.query.since || Date.now() - 3600000;
   
-  db.all("SELECT pixel_id, timestamp FROM logs WHERE timestamp > ?", 
-    [new Date(parseInt(since)).toISOString()], 
-    (err, logs) => {
-      if (err) {
-        console.error('Error fetching logs:', err);
-        return res.status(500).json({ error: 'Database error' });
-      }
-      
-      res.json({
-        openedPixels: logs.map(log => ({
-          id: log.pixel_id,
-          timestamp: log.timestamp
-        }))
-      });
+  // Modified query to get first open per pixel
+  const query = `
+    SELECT pixel_id, MIN(timestamp) AS first_open
+    FROM logs
+    WHERE timestamp > ?
+    GROUP BY pixel_id
+  `;
+  
+  db.all(query, [new Date(parseInt(since)).toISOString()], (err, logs) => {
+    if (err) {
+      console.error('Error fetching logs:', err);
+      return res.status(500).json({ error: 'Database error' });
     }
-  );
+    
+    res.json({
+      openedPixels: logs.map(log => ({
+        id: log.pixel_id,
+        timestamp: log.first_open
+      }))
+    });
+  });
 });
+
 
 // Start server
 const PORT = process.env.PORT || 3000;
