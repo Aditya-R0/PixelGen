@@ -5,10 +5,13 @@ const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors'); // Added CORS support
 const app = express();
 
+
+
 // Enable CORS for all origins (essential for extension)
 app.use(cors());
 
 // Configuration
+app.set('trust proxy', true);
 app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json()); // Added JSON body parser
@@ -81,7 +84,7 @@ app.post('/create', (req, res) => {
 // Pixel tracking endpoint
 app.get('/tracker/:id.png', (req, res) => {
   const pixelId = req.params.id;
-  const ip = req.ip;
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
   const userAgent = req.get('User-Agent') || 'Unknown';
 
   db.run("INSERT INTO logs (pixel_id, ip, user_agent) VALUES (?, ?, ?)", 
@@ -122,26 +125,28 @@ app.get('/logs/:id', (req, res) => {
 app.get('/check', (req, res) => {
   const since = req.query.since || Date.now() - 3600000;
   const sinceDate = new Date(parseInt(since));
-const formattedSince = sinceDate.toISOString()
+  const formattedSince = sinceDate.toISOString()
   .replace('T', ' ')
   .substring(0, 19);  // Modified query to get first open per pixel
   db.all(
-    `SELECT pixel_id, MIN(timestamp) AS first_open 
-     FROM logs 
-     WHERE timestamp > ? 
-     GROUP BY pixel_id`,
-    [formattedSince],
-    (err, logs) => {
+    `SELECT pixel_id, ip FROM logs WHERE timestamp > ? ORDER BY pixel_id, timestamp`,
+      [formattedSince],
+      (err, rows) => {
       if (err) {
         console.error('Error fetching logs:', err);
         return res.status(500).json({ error: 'Database error' });
       }
-      res.json({
-        openedPixels: logs.map(log => ({
-          id: log.pixel_id,
-          timestamp: log.first_open
-        }))
+      const result = {};
+      rows.forEach(row => {
+        if (!result[row.pixel_id]) result[row.pixel_id] = new Set();
+        result[row.pixel_id].add(row.ip);
       });
+      // Format as required
+      const openedPixels = Object.entries(result).map(([id, ips]) => ({
+        id,
+        ips: Array.from(ips)
+      }));
+      res.json({ openedPixels });
     }
   );
 });
