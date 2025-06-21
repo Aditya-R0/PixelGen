@@ -4,6 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors'); // Added CORS support
 const app = express();
+// Add at the top of app.js
+const dedupCache = new Map();
 
 
 
@@ -82,12 +84,27 @@ app.post('/create', (req, res) => {
 });
 
 // Pixel tracking endpoint
+// Pixel tracking endpoint with deduplication
 app.get('/tracker/:id.png', (req, res) => {
   const pixelId = req.params.id;
-  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+  const ip = req.clientIp; // Using request-ip middleware
   const userAgent = req.get('User-Agent') || 'Unknown';
-
-  db.run("INSERT INTO logs (pixel_id, ip, user_agent) VALUES (?, ?, ?)", 
+  
+  // Deduplication key = pixelId + IP
+  const dedupKey = `${pixelId}-${ip}`;
+  
+  // Skip if request from same IP within 5 minutes
+  if (dedupCache.has(dedupKey)) {
+    return res.sendFile(path.join(__dirname, 'public/images/pixel.png'));
+  }
+  
+  // Add to cache with 5-minute expiration
+  dedupCache.set(dedupKey, true);
+  setTimeout(() => dedupCache.delete(dedupKey), 300000000); // 5 minutes
+  
+  // Log to database
+  db.run(
+    "INSERT INTO logs (pixel_id, ip, user_agent) VALUES (?, ?, ?)", 
     [pixelId, ip, userAgent], 
     (err) => {
       if (err) console.error('Logging error:', err);
