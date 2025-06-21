@@ -117,6 +117,28 @@ app.get('/logs/:id', (req, res) => {
   });
 });
 
+// ADD THIS NEW ENDPOINT HERE:
+app.get('/check', (req, res) => {
+  const since = req.query.since || Date.now() - 3600000; // Default to last hour
+  
+  db.all("SELECT pixel_id, timestamp FROM logs WHERE timestamp > ?", 
+    [new Date(parseInt(since)).toISOString()], 
+    (err, logs) => {
+      if (err) {
+        console.error('Error fetching logs:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      
+      res.json({
+        openedPixels: logs.map(log => ({
+          id: log.pixel_id,
+          timestamp: log.timestamp
+        }))
+      });
+    }
+  );
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
