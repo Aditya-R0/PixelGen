@@ -15,22 +15,21 @@ app.use(express.json()); // Added JSON body parser
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Database setup
-const db = new sqlite3.Database('pixels.db', (err) => {
-  if (err) {
-    console.error('Database error:', err.message);
-  } else {
-    console.log('Connected to SQLite database');
-  }
+const db = new sqlite3.Database('pixels.db', async (err) => {
+  if (err) return console.error(err.message);
   
-  db.run(`
+  await new Promise((resolve) => 
+    db.run(`
     CREATE TABLE IF NOT EXISTS pixels (
       id TEXT PRIMARY KEY,
       name TEXT,
       createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
     )
-  `);
+  `, resolve)
+  );
   
-  db.run(`
+   await new Promise((resolve) => 
+    db.run(`
     CREATE TABLE IF NOT EXISTS logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       pixel_id TEXT,
@@ -39,7 +38,9 @@ const db = new sqlite3.Database('pixels.db', (err) => {
       user_agent TEXT,
       FOREIGN KEY(pixel_id) REFERENCES pixels(id)
     )
-  `);
+  `, resolve)
+  );
+  console.log("Tables verified/created");
 });
 
 // Routes
@@ -120,30 +121,30 @@ app.get('/logs/:id', (req, res) => {
 // Add this after your existing routes in app.js
 app.get('/check', (req, res) => {
   const since = req.query.since || Date.now() - 3600000;
-  
-  // Modified query to get first open per pixel
-  const query = `
-    SELECT pixel_id, MIN(timestamp) AS first_open
-    FROM logs
-    WHERE timestamp > ?
-    GROUP BY pixel_id
-  `;
-  
-  db.all(query, [new Date(parseInt(since)).toISOString()], (err, logs) => {
-    if (err) {
-      console.error('Error fetching logs:', err);
-      return res.status(500).json({ error: 'Database error' });
+  const sinceDate = new Date(parseInt(since));
+const formattedSince = sinceDate.toISOString()
+  .replace('T', ' ')
+  .substring(0, 19);  // Modified query to get first open per pixel
+  db.all(
+    `SELECT pixel_id, MIN(timestamp) AS first_open 
+     FROM logs 
+     WHERE timestamp > ? 
+     GROUP BY pixel_id`,
+    [formattedSince],
+    (err, logs) => {
+      if (err) {
+        console.error('Error fetching logs:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      res.json({
+        openedPixels: logs.map(log => ({
+          id: log.pixel_id,
+          timestamp: log.first_open
+        }))
+      });
     }
-    
-    res.json({
-      openedPixels: logs.map(log => ({
-        id: log.pixel_id,
-        timestamp: log.first_open
-      }))
-    });
-  });
+  );
 });
-
 
 // Start server
 const PORT = process.env.PORT || 3000;
