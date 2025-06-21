@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors'); // Added CORS support
 const app = express();
+const sessionCache = new Map();
 
 
 
@@ -16,6 +17,32 @@ app.set('view engine', 'ejs');
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json()); // Added JSON body parser
 app.use(express.static(path.join(__dirname, 'public')));
+
+
+
+function getClientIp(req) {
+  try {
+    // Check X-Forwarded-For header
+    const xff = req.headers['x-forwarded-for'];
+    if (xff) {
+      const firstIp = xff.split(',')[0].trim();
+      if (firstIp) return firstIp;
+    }
+    
+    // Check Forwarded header (standard)
+    const forwarded = req.headers['forwarded'];
+    if (forwarded) {
+      const match = forwarded.match(/for=([^;]+)/i);
+      if (match?.[1]) return match[1].replace(/^"|"$/g, '');
+    }
+    
+    // Fallback to connection info
+    return req.connection.remoteAddress || req.socket.remoteAddress || req.ip || 'Unknown';
+  } catch {
+    return 'Unknown';
+  }
+}
+
 
 // Database setup
 const db = new sqlite3.Database('pixels.db', async (err) => {
@@ -31,18 +58,19 @@ const db = new sqlite3.Database('pixels.db', async (err) => {
   `, resolve)
   );
   
-   await new Promise((resolve) => 
+  await new Promise((resolve) => 
     db.run(`
     CREATE TABLE IF NOT EXISTS logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       pixel_id TEXT,
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-      ip TEXT,
+      ip TEXT NOT NULL DEFAULT 'Unknown', // Prevent NULL
       user_agent TEXT,
       FOREIGN KEY(pixel_id) REFERENCES pixels(id)
     )
   `, resolve)
   );
+
   console.log("Tables verified/created");
 });
 
@@ -84,11 +112,24 @@ app.post('/create', (req, res) => {
 // Pixel tracking endpoint
 app.get('/tracker/:id.png', (req, res) => {
   const pixelId = req.params.id;
-  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+  const ip = getClientIp(req); // Using our robust function
   const userAgent = req.get('User-Agent') || 'Unknown';
-
+  
+  // Create session fingerprint - handle empty values
+  const sessionId = [ip, userAgent].filter(Boolean).join('-').replace(/\s+/g, '');
+  
+  // Skip if session already logged
+  if (sessionCache.has(sessionId)) {
+    return res.sendFile(path.join(__dirname, 'public/images/pixel.png'));
+  }
+  
+  // Add to session cache
+  sessionCache.set(sessionId, true);
+  setTimeout(() => sessionCache.delete(sessionId), 3600000); // 1 hour
+  
+  // Log to database (ensure IP is never null)
   db.run("INSERT INTO logs (pixel_id, ip, user_agent) VALUES (?, ?, ?)", 
-    [pixelId, ip, userAgent], 
+    [pixelId, ip || 'Unknown', userAgent], 
     (err) => {
       if (err) console.error('Logging error:', err);
       res.sendFile(path.join(__dirname, 'public/images/pixel.png'));
